@@ -1,0 +1,19 @@
+# Block Python compiled cache folders
+__pycache__/
+*.pyc
+
+# Block machine learning model training weight binaries
+*.pth
+*.pt
+*.h5
+
+# Block raw testing data directories
+dataset/
+training_data/
+test_data/
+
+# Block local system environment caches
+.env
+venv/
+env/
+.DS_Store
