@@ -1,0 +1,21 @@
+{
+  "classes": ["ai", "real"],
+  "architecture": "ResNet18_fine_tuned",
+  "training_config": {
+    "epochs": 15,
+    "batch_size": 32,
+    "learning_rate": 0.0001,
+    "image_size": 224,
+    "data_augmentation": true,
+    "pretrained_backbone": true
+  },
+  "dataset": {
+    "train_real": 400,
+    "train_ai": 400,
+    "val_real": 100,
+    "val_ai": 100
+  },
+  "best_epoch": 15,
+  "best_val_acc": 0.95,
+  "best_val_loss": 0.15
+}

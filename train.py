@@ -1,329 +1,299 @@
+#!/usr/bin/env python3
 """
-================================================================================
-🔥 SUDOSCORPSTINGVISION — IMPROVED TRAINING PIPELINE
-================================================================================
-Trains a DeepfakeDetectorCNN (or a pretrained ResNet18 backbone) on a
-real-vs-AI image dataset and saves trained weights + class mapping.
-
-Dataset layout (ImageFolder convention):
-    dataset/
-        train/
-            real/   <-- authentic images
-            ai/     <-- AI-generated images
-        val/
-            real/
-            ai/
-
-If no dataset is found, the script auto-generates a small synthetic dataset
-so the pipeline can be exercised end-to-end.
+SudoScorpStingVision — Training Pipeline
+Fine-tunes a ResNet18-based model to detect AI-generated media and attribute sources.
 """
 
 import os
+import argparse
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms, models
-from torchvision.models import ResNet18_Weights
+from torchvision import transforms, models
+from torchvision.datasets import ImageFolder
+from PIL import Image
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
-import random
 
-# ---------------------------------------------------------------------------
-# Model definitions
-# ---------------------------------------------------------------------------
+# ---- Model Definition ----
 
-class DeepfakeDetectorCNN(nn.Module):
-    """Original 3-conv-layer CNN from the repo (kept for compatibility)."""
-
-    def __init__(self):
+class DeepfakeDetector(nn.Module):
+    """Fine-tuned ResNet18 for real/AI classification with source attribution."""
+    
+    def __init__(self, num_classes=2, pretrained=True):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.fc1 = nn.Linear(128 * 28 * 28, 512)
-        self.fc2 = nn.Linear(512, 2)
-
-    def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = self.pool(F.relu(self.conv3(x)))
-        x = x.view(x.size(0), -1)
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x
-
-
-class ResNetDetector(nn.Module):
-    """
-    Lightweight wrapper around a pretrained ResNet18.
-    Early layers are frozen; only the final FC layer is retrained for
-    binary real-vs-AI classification.  This gives the model a meaningful
-    feature basis from day one instead of random guessing.
-    """
-
-    def __init__(self, freeze_backbone=True):
-        super().__init__()
-        weights = ResNet18_Weights.DEFAULT
+        weights = models.ResNet18_Weights.DEFAULT if pretrained else None
         self.backbone = models.resnet18(weights=weights)
-
-        if freeze_backbone:
-            for param in self.backbone.parameters():
-                param.requires_grad = False
-            # unfreeze the last conv block so the model can still adapt
-            for param in self.backbone.layer4.parameters():
-                param.requires_grad = True
-
-        # Replace the classifier head: 512 -> 2 (real / ai)
+        
+        # Freeze early layers for transfer learning
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+        # Unfreeze last layer block for fine-tuning
+        for param in self.backbone.layer4.parameters():
+            param.requires_grad = True
+        
+        # Replace classifier
+        num_features = self.backbone.fc.in_features
         self.backbone.fc = nn.Sequential(
+            nn.Dropout(0.4),
+            nn.Linear(num_features, 128),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(128),
             nn.Dropout(0.3),
-            nn.Linear(512, 2),
+            nn.Linear(128, num_classes),
         )
-
+    
     def forward(self, x):
         return self.backbone(x)
 
 
-# ---------------------------------------------------------------------------
-# Synthetic dataset generator (so training works even with no real data)
-# ---------------------------------------------------------------------------
-
-def generate_synthetic_dataset(base_dir="dataset", samples_per_class=200):
-    """
-    Creates a tiny labelled dataset of procedurally-generated images.
-    'real'  — photographic-style noise + gradients.
-    'ai'    — flat colour fields with sharp geometric artefacts (mimicking
-             the kind of tell-tale precision artefacts sometimes seen in
-             early generative outputs).  These are NOT real deepfakes — they
-             exist purely so the training loop can be validated end-to-end.
-    """
-    print("[SYNTH] Generating synthetic training dataset ...")
-    transforms_gen = {
-        "train": os.path.join(base_dir, "train"),
-        "val": os.path.join(base_dir, "val"),
-    }
-    for split, path in transforms_gen.items():
-        for cls in ("real", "ai"):
-            os.makedirs(os.path.join(path, cls), exist_ok=True)
-
-    rng = random.Random(42)
-    for split, path in transforms_gen.items():
-        n = samples_per_class if split == "train" else samples_per_class // 4
-        for i in range(n):
-            for cls in ("real", "ai"):
-                img = Image.new("RGB", (224, 224), color=(0, 0, 0))
-                draw = ImageDraw.Draw(img)
-                if cls == "real":
-                    # Noise-like photographic texture
-                    arr = np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
-                    # smooth with a mild blur to look less computer-generated
-                    pim = Image.fromarray(arr).filter(ImageFilter.GaussianBlur(radius=2))
-                    # add a subtle gradient
-                    for y in range(0, 224, 10):
-                        shade = int(128 + 64 * np.sin(y / 224 * 6.28))
-                        draw.line([(0, y), (224, y)], fill=(shade, shade, shade), width=2)
-                    pim = Image.blend(pim, img, 0.3)
-                    pim.save(os.path.join(path, cls, f"{i:04d}.png"))
-                else:
-                    # AI-like: flat colour + sharp geometric shapes
-                    base_color = (rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255))
-                    draw.rectangle([0, 0, 224, 224], fill=base_color)
-                    for _ in range(rng.randint(3, 8)):
-                        shape_type = rng.choice(["rect", "circle", "line"])
-                        if shape_type == "rect":
-                            x0, y0 = rng.randint(0, 100), rng.randint(0, 100)
-                            x1, y1 = x0 + rng.randint(20, 80), y0 + rng.randint(20, 80)
-                            draw.rectangle([x0, y0, x1, y1], fill=(
-                                rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255)))
-                        elif shape_type == "circle":
-                            cx, cy = rng.randint(0, 224), rng.randint(0, 224)
-                            r = rng.randint(10, 50)
-                            draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(
-                                rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255)))
-                        else:
-                            x0, y0 = rng.randint(0, 224), rng.randint(0, 224)
-                            x1, y1 = rng.randint(0, 224), rng.randint(0, 224)
-                            draw.line([(x0, y0), (x1, y1)], fill=(
-                                rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255)), width=3)
-                    img.save(os.path.join(path, cls, f"{i:04d}.png"))
-    print(f"[SYNTH] Done — dataset/ tree written with {n} val + {samples_per_class} train images per class.")
-
-
-# ---------------------------------------------------------------------------
-# Training
-# ---------------------------------------------------------------------------
-
-def train_model(
-    data_dir="dataset",
-    batch_size=32,
-    epochs=10,
-    learning_rate=1e-3,
-    use_pretrained=True,
-    synthetic_samples=200,
-    patience=3,
-    checkpoint_path="best_model.pth",
-    class_map_path="class_map.json",
-):
-    print("=" * 60)
-    print("  SUDOSCORPSTINGVISION  TRAINING PIPELINE")
-    print("=" * 60)
-
-    # --- auto-generate synthetic data if no dataset present ----------------
-    if not os.path.isdir(os.path.join(data_dir, "train")):
-        print(f"\n[INFO] No dataset found at '{data_dir}'.")
-        print("[INFO] Generating synthetic dataset so the pipeline can be validated ...")
-        generate_synthetic_dataset(data_dir, samples_per_class=synthetic_samples)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"\nDevice: {device}")
-
-    # --- transforms ---------------------------------------------------------
-    data_transforms = {
-        "train": transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomRotation(10),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+def get_transforms(img_size=224, augment=True):
+    """Image transforms for training/validation."""
+    if augment:
+        train_tf = transforms.Compose([
+            transforms.Resize((img_size + 32, img_size + 32)),
+            transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0)),
+            transforms.RandomHorizontalFlip(0.5),
+            transforms.RandomRotation(20),
+            transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3),
             transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-        ]),
-        "val": transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-        ]),
-    }
-
-    image_datasets = {
-        x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x])
-        for x in ("train", "val")
-    }
-    dataloaders = {
-        x: DataLoader(image_datasets[x], batch_size=batch_size, shuffle=(x == "train"),
-                      num_workers=2, pin_memory=True if device.type == "cuda" else False)
-        for x in ("train", "val")
-    }
-
-    class_names = image_datasets["train"].classes
-    class_to_idx = image_datasets["train"].class_to_idx
-    # ImageFolder sorts classes alphabetically.  Make sure we know which index
-    # corresponds to the "ai" class so inference can read the right probability.
-    ai_class_name = "ai"
-    if ai_class_name not in class_to_idx:
-        raise SystemExit(
-            f"[FATAL] Expected a class named '{ai_class_name}' in the dataset, "
-            f"but found {class_names}. Rename your ai/ folder accordingly."
-        )
-    ai_label = class_to_idx[ai_class_name]
-    print(f"Classes: {class_names}  (mapping: {class_to_idx}, ai_label={ai_label})")
-    print(f"Train samples: {len(image_datasets['train'])}  |  Val samples: {len(image_datasets['val'])}")
-
-    # --- save class mapping (needed at inference time) --------------------
-    import json
-    with open(class_map_path, "w") as f:
-        json.dump({"classes": class_names, "class_to_idx": class_to_idx, "ai_label": ai_label}, f, indent=2)
-    print(f"Class map saved → {class_map_path}")
-
-    # --- model --------------------------------------------------------------
-    if use_pretrained:
-        print("\n[INFO] Using pretrained ResNet18 backbone (fine-tuning last block + classifier).")
-        model = ResNetDetector(freeze_backbone=True).to(device)
-    else:
-        print("\n[INFO] Using scratch DeepfakeDetectorCNN (random init).")
-        model = DeepfakeDetectorCNN().to(device)
-
-    criterion = nn.CrossEntropyLoss()
-    # higher LR for the trained head, lower for the backbone if unfrozen
-    if use_pretrained:
-        head_params = list(model.backbone.fc.parameters())
-        backbone_params = [p for p in model.backbone.layer4.parameters() if p.requires_grad]
-        optimizer = optim.Adam([
-            {"params": head_params, "lr": learning_rate},
-            {"params": backbone_params, "lr": learning_rate * 0.1},
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                std=[0.229, 0.224, 0.225]),
         ])
     else:
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        train_tf = transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                std=[0.229, 0.224, 0.225]),
+        ])
+    
+    val_tf = transforms.Compose([
+        transforms.Resize((img_size, img_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225]),
+    ])
+    
+    return train_tf, val_tf
 
+
+def train(args):
+    """Main training loop."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
+    
+    data_dir = args.data
+    img_size = args.img_size
+    
+    if not os.path.isdir(data_dir):
+        print(f"ERROR: Dataset directory not found: {data_dir}")
+        print("Generate one first: python generate_dataset.py")
+        return False
+    
+    # Discover classes
+    class_dirs = sorted([d for d in os.listdir(data_dir) 
+                         if os.path.isdir(os.path.join(data_dir, d))])
+    
+    if len(class_dirs) < 2:
+        print(f"ERROR: Need at least 2 class directories, found: {class_dirs}")
+        return False
+    
+    print(f"Classes ({len(class_dirs)}): {class_dirs}")
+    
+    # Transforms
+    train_tf, val_tf = get_transforms(img_size, augment=args.augment)
+    
+    # Datasets with train/val split
+    train_dir = os.path.join(data_dir, "train")
+    val_dir = os.path.join(data_dir, "val")
+    
+    if not os.path.isdir(train_dir) or not os.path.isdir(val_dir):
+        print("Creating train/val split from dataset directory...")
+        os.makedirs(train_dir, exist_ok=True)
+        os.makedirs(val_dir, exist_ok=True)
+        
+        for cls in class_dirs:
+            src = os.path.join(data_dir, cls)
+            if os.path.isdir(src):
+                files = sorted(os.listdir(src))
+                split_idx = int(len(files) * 0.8)
+                for i, fname in enumerate(files):
+                    src_path = os.path.join(src, fname)
+                    if i < split_idx:
+                        dst = os.path.join(train_dir, cls, fname)
+                    else:
+                        dst = os.path.join(val_dir, cls, fname)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    if not os.path.exists(dst):
+                        import shutil
+                        shutil.copy2(src_path, dst)
+    
+    train_dataset = ImageFolder(train_dir, transform=train_tf)
+    val_dataset = ImageFolder(val_dir, transform=val_tf)
+    
+    num_classes = len(train_dataset.classes)
+    print(f"Number of classes: {num_classes}")
+    print(f"Class mapping: {train_dataset.class_to_idx}")
+    print(f"Train samples: {len(train_dataset)}")
+    print(f"Val samples: {len(val_dataset)}")
+    
+    # DataLoaders
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, 
+                             shuffle=True, num_workers=args.num_workers, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
+                           shuffle=False, num_workers=args.num_workers, pin_memory=True)
+    
+    # Model
+    model = DeepfakeDetector(num_classes=num_classes, pretrained=args.pretrained)
+    model = model.to(device)
+    
+    # Loss and optimizer
+    class_counts = np.bincount([label for _, label in train_dataset], minlength=num_classes)
+    class_weights = 1.0 / (class_counts + 1)
+    class_weights = class_weights / class_weights.sum() * num_classes
+    criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(class_weights).to(device))
+    
+    optimizer = optim.AdamW([
+        {'params': model.backbone.fc.parameters(), 'lr': args.lr},
+        {'params': [p for n, p in model.backbone.named_parameters() 
+                    if 'layer4' in n and p.requires_grad], 'lr': args.lr * 0.1},
+    ], weight_decay=args.weight_decay)
+    
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', 
+                                                      factor=0.5, patience=3)
+    
+    # Training loop
     best_val_acc = 0.0
-    best_epoch = 0
-    patience_counter = 0
-
-    for epoch in range(epochs):
-        print(f"\n--- Epoch {epoch + 1}/{epochs} ---")
-        for phase in ("train", "val"):
-            model.train() if phase == "train" else model.eval()
-            running_loss = 0.0
-            running_correct = 0
-
-            for inputs, labels in dataloaders[phase]:
+    best_model_state = None
+    history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
+    
+    print(f"\nTraining for {args.epochs} epochs...")
+    print("-" * 60)
+    
+    for epoch in range(args.epochs):
+        # Training
+        model.train()
+        train_loss = 0.0
+        train_correct = 0
+        train_total = 0
+        
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item() * inputs.size(0)
+            _, predicted = outputs.max(1)
+            train_correct += predicted.eq(labels).sum().item()
+            train_total += labels.size(0)
+        
+        train_loss /= train_total
+        train_acc = train_correct / train_total
+        
+        # Validation
+        model.eval()
+        val_loss = 0.0
+        val_correct = 0
+        val_total = 0
+        
+        with torch.no_grad():
+            for inputs, labels in val_loader:
                 inputs, labels = inputs.to(device), labels.to(device)
-                optimizer.zero_grad()
-                with torch.set_grad_enabled(phase == "train"):
-                    outputs = model(inputs)
-                    _, preds = torch.max(outputs, 1)
-                    loss = criterion(outputs, labels)
-                    if phase == "train":
-                        loss.backward()
-                        optimizer.step()
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                
+                val_loss += loss.item() * inputs.size(0)
+                _, predicted = outputs.max(1)
+                val_correct += predicted.eq(labels).sum().item()
+                val_total += labels.size(0)
+        
+        val_loss /= val_total
+        val_acc = val_correct / val_total
+        
+        scheduler.step(val_loss)
+        
+        # Logging
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"Epoch {epoch+1:3d}/{args.epochs} | "
+              f"Train Loss: {train_loss:.4f} Acc: {train_acc:.4f} | "
+              f"Val Loss: {val_loss:.4f} Acc: {val_acc:.4f} | "
+              f"LR: {current_lr:.6f}")
+        
+        history['train_loss'].append(train_loss)
+        history['train_acc'].append(train_acc)
+        history['val_loss'].append(val_loss)
+        history['val_acc'].append(val_acc)
+        
+        # Save best
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            print(f"  -> Best model! (val_acc: {val_acc:.4f})")
+    
+    # Save best model
+    if best_model_state is not None:
+        torch.save(best_model_state, "best_model.pth")
+        print(f"\nBest model saved (val_acc: {best_val_acc:.4f})")
+    
+    # Copy to model_weights.pth for the server
+    if os.path.exists("best_model.pth"):
+        import shutil
+        shutil.copy("best_model.pth", "model_weights.pth")
+        print("Copied to model_weights.pth")
+    
+    # Save class map
+    class_map = {
+        "classes": train_dataset.classes,
+        "class_to_idx": {c: i for i, c in enumerate(train_dataset.classes)},
+        "idx_to_class": {i: c for i, c in enumerate(train_dataset.classes)},
+        "num_classes": num_classes,
+        "best_val_acc": float(best_val_acc),
+    }
+    
+    import json
+    with open("class_map.json", "w") as f:
+        json.dump(class_map, f, indent=2)
+    print("class_map.json saved")
+    
+    # Save training history
+    history['classes'] = train_dataset.classes
+    with open("training_history.json", "w") as f:
+        json.dump(history, f, indent=2)
+    print("training_history.json saved")
+    
+    print(f"\nTraining complete! Best val accuracy: {best_val_acc:.4f}")
+    return True
 
-                running_loss += loss.item() * inputs.size(0)
-                running_correct += torch.sum(preds == labels.data).item()
 
-            epoch_loss = running_loss / len(image_datasets[phase])
-            epoch_acc = running_correct / len(image_datasets[phase])
-            print(f"  [{phase.upper()}] Loss: {epoch_loss:.4f}  Acc: {epoch_acc:.4f}")
-
-            if phase == "val" and epoch_acc > best_val_acc:
-                best_val_acc = epoch_acc
-                best_epoch = epoch + 1
-                patience_counter = 0
-                torch.save(model.state_dict(), checkpoint_path)
-                print(f"  ★ New best model saved → {checkpoint_path}  (val_acc={best_val_acc:.4f})")
-            elif phase == "val":
-                patience_counter += 1
-
-        if patience_counter >= patience:
-            print(f"\n[EARLY STOP] No val improvement for {patience} epochs. Stopping.")
-            break
-
-    print(f"\n{'=' * 60}")
-    print(f"  Training complete. Best val accuracy: {best_val_acc:.4f} (epoch {best_epoch})")
-    print(f"  Best weights: {checkpoint_path}")
-    print(f"{'=' * 60}")
-
-    # Also save a copy named model_weights.pth for backward compatibility
-    # with the original main.py loader, plus an architecture marker so the
-    # server can pick the right model class automatically.
-    if os.path.exists(checkpoint_path):
-        import json
-        arch_name = "resnet" if use_pretrained else "cnn"
-        with open("model_arch.json", "w") as f:
-            json.dump({"architecture": arch_name, "checkpoint": checkpoint_path}, f, indent=2)
-        torch.save(model.state_dict(), "model_weights.pth")
-        print("  Compatible copy saved → model_weights.pth")
-        print(f"  Architecture marker saved → model_arch.json  (arch={arch_name})")
+def main():
+    parser = argparse.ArgumentParser(description="Train SudoScorpStingVision model")
+    parser.add_argument("--data", "-d", default="dataset", help="Dataset directory")
+    parser.add_argument("--epochs", "-e", type=int, default=30, help="Number of epochs")
+    parser.add_argument("--batch-size", "-b", type=int, default=32, help="Batch size")
+    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
+    parser.add_argument("--weight-decay", type=float, default=1e-4, help="Weight decay")
+    parser.add_argument("--img-size", "-s", type=int, default=224, help="Image size")
+    parser.add_argument("--no-augment", action="store_true", help="Disable data augmentation")
+    parser.add_argument("--no-pretrained", action="store_true", help="Don't use pretrained weights")
+    parser.add_argument("--num-workers", "-w", type=int, default=2, help="DataLoader workers")
+    args = parser.parse_args()
+    
+    args.augment = not args.no_augment
+    args.pretrained = not args.no_pretrained
+    
+    success = train(args)
+    if success:
+        print("\nDone! Run 'python main.py' to start the inference server.")
+    else:
+        print("\nTraining failed!")
+        import sys
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Train the deepfake detector.")
-    parser.add_argument("--data", default="dataset", help="Path to dataset directory.")
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--batch", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--no-pretrained", action="store_true", help="Train from scratch (no ResNet18).")
-    parser.add_argument("--synthetic", type=int, default=200, help="Synthetic samples per class if no dataset.")
-    parser.add_argument("--patience", type=int, default=3)
-    args = parser.parse_args()
-
-    train_model(
-        data_dir=args.data,
-        batch_size=args.batch,
-        epochs=args.epochs,
-        learning_rate=args.lr,
-        use_pretrained=not args.no_pretrained,
-        synthetic_samples=args.synthetic,
-        patience=args.patience,
-    )
+    main()

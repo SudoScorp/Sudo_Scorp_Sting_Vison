@@ -1,10 +1,22 @@
 {
-  "classes": [
-    "ai",
-    "real"
-  ],
+  "classes": ["ai", "real"],
   "class_to_idx": {
     "ai": 0,
     "real": 1
+  },
+  "idx_to_class": {
+    "0": "ai",
+    "1": "real"
+  },
+  "num_classes": 2,
+  "model_file": "best_model.pth",
+  "model_size_bytes": 45319039,
+  "architecture": "ResNet18_fine_tuned",
+  "training_config": {
+    "epochs": 15,
+    "batch_size": 32,
+    "learning_rate": 0.0001,
+    "image_size": 224,
+    "pretrained": true
   }
 }
