@@ -120,7 +120,7 @@ class_names = ["real", "ai"]
 class_to_idx = {"real": 0, "ai": 1}
 
 def _detect_and_load():
-    global model, weights_loaded, architecture, class_names, class_to_idx
+    global model, weights_loaded, architecture, class_names, class_to_idx, ai_label
 
     if not os.path.exists(MODEL_WEIGHTS_PATH):
         print("[INFO] No model_weights.pth found — running with untrained weights.")
@@ -164,7 +164,8 @@ def _detect_and_load():
                 cmap = json.load(f)
             class_names = cmap["classes"]
             class_to_idx = cmap["class_to_idx"]
-            print(f"[OK] Class map: {class_names}")
+            ai_label = cmap.get("ai_label", 1)
+            print(f"[OK] Class map: {class_names}  (ai_label={ai_label})")
         except Exception as e:
             print(f"[WARN] Could not load class map: {e}")
 
@@ -219,8 +220,8 @@ def process_image(file_path):
     with torch.no_grad():
         outputs = model(tensor)
         probabilities = F.softmax(outputs, dim=1)
-        ai_prob = probabilities[0][1].item()
-    return ai_prob, class_names[1] if ai_prob > 0.5 else class_names[0]
+        ai_prob = probabilities[0][ai_label].item()
+    return ai_prob, class_names[ai_label] if ai_prob > 0.5 else class_names[1 - ai_label]
 
 
 def process_video(file_path):
@@ -237,13 +238,13 @@ def process_video(file_path):
         frame_count += 1
     cap.release()
     if not frames:
-        return 0.0, class_names[0]
+        return 0.0, class_names[1 - ai_label]
     batch = torch.stack(frames)
     with torch.no_grad():
         outputs = model(batch)
         probabilities = F.softmax(outputs, dim=1)
-        ai_prob = torch.mean(probabilities[:, 1]).item()
-    return ai_prob, class_names[1] if ai_prob > 0.5 else class_names[0]
+        ai_prob = torch.mean(probabilities[:, ai_label]).item()
+    return ai_prob, class_names[ai_label] if ai_prob > 0.5 else class_names[1 - ai_label]
 
 
 def process_audio(file_path):
@@ -259,8 +260,8 @@ def process_audio(file_path):
     with torch.no_grad():
         outputs = model(three_channel)
         probabilities = F.softmax(outputs, dim=1)
-        ai_prob = probabilities[0][1].item()
-    return ai_prob, class_names[1] if ai_prob > 0.5 else class_names[0]
+        ai_prob = probabilities[0][ai_label].item()
+    return ai_prob, class_names[ai_label] if ai_prob > 0.5 else class_names[1 - ai_label]
 
 
 async def save_temp_file(file: UploadFile):
@@ -281,6 +282,7 @@ class HealthResponse(BaseModel):
     weights_loaded: bool
     architecture: str
     class_names: list[str]
+    ai_label: int
     device: str
 
 
@@ -292,6 +294,7 @@ def health():
         weights_loaded=weights_loaded,
         architecture=architecture,
         class_names=class_names,
+        ai_label=ai_label,
         device=torch.device("cuda" if torch.cuda.is_available() else "cpu").type,
     )
 

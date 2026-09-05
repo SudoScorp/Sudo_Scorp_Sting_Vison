@@ -208,13 +208,22 @@ def train_model(
 
     class_names = image_datasets["train"].classes
     class_to_idx = image_datasets["train"].class_to_idx
-    print(f"Classes: {class_names}  (mapping: {class_to_idx})")
+    # ImageFolder sorts classes alphabetically.  Make sure we know which index
+    # corresponds to the "ai" class so inference can read the right probability.
+    ai_class_name = "ai"
+    if ai_class_name not in class_to_idx:
+        raise SystemExit(
+            f"[FATAL] Expected a class named '{ai_class_name}' in the dataset, "
+            f"but found {class_names}. Rename your ai/ folder accordingly."
+        )
+    ai_label = class_to_idx[ai_class_name]
+    print(f"Classes: {class_names}  (mapping: {class_to_idx}, ai_label={ai_label})")
     print(f"Train samples: {len(image_datasets['train'])}  |  Val samples: {len(image_datasets['val'])}")
 
     # --- save class mapping (needed at inference time) --------------------
     import json
     with open(class_map_path, "w") as f:
-        json.dump({"classes": class_names, "class_to_idx": class_to_idx}, f, indent=2)
+        json.dump({"classes": class_names, "class_to_idx": class_to_idx, "ai_label": ai_label}, f, indent=2)
     print(f"Class map saved → {class_map_path}")
 
     # --- model --------------------------------------------------------------
