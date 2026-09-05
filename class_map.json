@@ -1,0 +1,10 @@
+{
+  "classes": [
+    "ai",
+    "real"
+  ],
+  "class_to_idx": {
+    "ai": 0,
+    "real": 1
+  }
+}

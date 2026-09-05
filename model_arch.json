@@ -1,0 +1,4 @@
+{
+  "architecture": "resnet",
+  "checkpoint": "best_model.pth"
+}
