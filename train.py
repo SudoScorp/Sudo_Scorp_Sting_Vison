@@ -10,41 +10,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torchvision import transforms, models
+from torchvision import transforms
 from torchvision.datasets import ImageFolder
-from PIL import Image
 import numpy as np
 
-# ---- Model Definition ----
-
-class DeepfakeDetector(nn.Module):
-    """Fine-tuned ResNet18 for real/AI classification with source attribution."""
-    
-    def __init__(self, num_classes=2, pretrained=True):
-        super().__init__()
-        weights = models.ResNet18_Weights.DEFAULT if pretrained else None
-        self.backbone = models.resnet18(weights=weights)
-        
-        # Freeze early layers for transfer learning
-        for param in self.backbone.parameters():
-            param.requires_grad = False
-        # Unfreeze last layer block for fine-tuning
-        for param in self.backbone.layer4.parameters():
-            param.requires_grad = True
-        
-        # Replace classifier
-        num_features = self.backbone.fc.in_features
-        self.backbone.fc = nn.Sequential(
-            nn.Dropout(0.4),
-            nn.Linear(num_features, 128),
-            nn.ReLU(inplace=True),
-            nn.BatchNorm1d(128),
-            nn.Dropout(0.3),
-            nn.Linear(128, num_classes),
-        )
-    
-    def forward(self, x):
-        return self.backbone(x)
+from model import DeepfakeDetectorCNN as DeepfakeDetector
 
 
 def get_transforms(img_size=224, augment=True):

@@ -1,45 +1,35 @@
 """Test all detection pipelines directly without HTTP server."""
-import sys, os, json
-tmpdir = os.path.join(os.environ.get('LOCALAPPDATA', 'C:/Users/sudos/AppData/Local'), 'Temp', 'Sudo_Scorp_Sting_Vison')
-if os.path.isdir(tmpdir):
-    os.chdir(tmpdir)
-    sys.path.insert(0, tmpdir)
-    print(f"Working dir: {os.getcwd()}")
-else:
-    # Try alternative locations
-    for p in [r'C:\Users\sudos\AppData\Local\Temp\Sudo_Scorp_Sting_Vison',
-              r'C:\Users\sudos\odysseus\Sudo_Scorp_Sting_Vison']:
-        if os.path.isdir(p):
-            os.chdir(p)
-            sys.path.insert(0, p)
-            print(f"Working dir: {os.getcwd()}")
-            break
-    else:
-        print("ERROR: Cannot find working directory")
-        sys.exit(1)
-
+import importlib.util
+import json
+import os
+import sys
 import warnings
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-import torch
-import numpy as np
-from PIL import Image
-from torchvision import transforms
-from model import DeepfakeDetectorCNN
+repo_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(repo_dir)
+sys.path.insert(0, repo_dir)
+print(f"Working dir: {os.getcwd()}")
 
-print("="*60)
+import torch  # noqa: E402
+from PIL import Image  # noqa: E402
+from torchvision import transforms  # noqa: E402
+from model import DeepfakeDetectorCNN  # noqa: E402
+
+print("=" * 60)
 print("TESTING SUDOSCORPSTINGVISION PIPELINE")
-print("="*60)
+print("=" * 60)
 
 # Load model
-state = torch.load('best_model.pth', map_location='cpu', weights_only=True)
-num_classes = state['backbone.fc.5.weight'].shape[0]
+state = torch.load("best_model.pth", map_location="cpu", weights_only=True)
+num_classes = state["backbone.fc.5.weight"].shape[0]
 model = DeepfakeDetectorCNN(num_classes=num_classes, pretrained=False)
 model.load_state_dict(state)
 model.eval()
 
-with open('class_map.json') as f:
-    class_map = json.load(f)
+with open("class_map.json") as fh:
+    class_map = json.load(fh)
 print(f"Model loaded: {class_map['classes']}")
 
 transform = transforms.Compose([
@@ -48,71 +38,76 @@ transform = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
 
+
 def predict_image(img_path):
-    img = Image.open(img_path).convert('RGB')
+    img = Image.open(img_path).convert("RGB")
     tensor = transform(img).unsqueeze(0)
     with torch.no_grad():
         out = model(tensor)
         probs = torch.softmax(out, 1)[0]
-    class_names = class_map['classes']
+    class_names = class_map["classes"]
     probs_dict = {c: round(float(probs[i]), 4) for i, c in enumerate(class_names)}
     pred_idx = int(probs.argmax())
     pred_class = class_names[pred_idx]
-    
-    if 'real' in class_names:
-        real_idx = class_map['class_to_idx']['real']
+
+    if "real" in class_names:
+        real_idx = class_map["class_to_idx"]["real"]
         ai_conf = 1.0 - float(probs[real_idx])
     else:
-        ai_conf = max(float(p) for c, p in probs_dict.items() if c != 'real')
-    
+        ai_conf = max(float(p) for c, p in probs_dict.items() if c != "real")
+
     is_ai = ai_conf > 0.5
     source = None
     if is_ai:
-        non_real = [(c, p) for c, p in probs_dict.items() if c != 'real']
+        non_real = [(c, p) for c, p in probs_dict.items() if c != "real"]
         if non_real:
             source = max(non_real, key=lambda x: x[1])[0]
-    
+
     return {
-        'is_ai_generated': is_ai,
-        'confidence': round(ai_conf, 4),
-        'predicted_class': pred_class,
-        'probabilities': probs_dict,
-        'source_attribution': source or 'N/A',
-        'generator': source or ('N/A' if not is_ai else 'Unknown'),
+        "is_ai_generated": is_ai,
+        "confidence": round(ai_conf, 4),
+        "predicted_class": pred_class,
+        "probabilities": probs_dict,
+        "source_attribution": source or "N/A",
+        "generator": source or ("N/A" if not is_ai else "Unknown"),
     }
 
-print("\n--- Testing Real Images (should be class=real, low AI confidence) ---")
-real_dir = 'dataset/val/real'
-real_files = sorted(os.listdir(real_dir))[:5]
-for f in real_files:
-    result = predict_image(os.path.join(real_dir, f))
-    status = "OK" if not result['is_ai_generated'] else "WRONG"
-    print(f"  {f}: {status} — conf={result['confidence']:.2f}, pred={result['predicted_class']}")
 
-print("\n--- Testing AI Images (should be class=ai, high AI confidence) ---")
-ai_dir = 'dataset/val/ai'
-ai_files = sorted(os.listdir(ai_dir))[:5]
-for f in ai_files:
-    result = predict_image(os.path.join(ai_dir, f))
-    status = "OK" if result['is_ai_generated'] else "WRONG"
-    print(f"  {f}: {status} — conf={result['confidence']:.2f}, pred={result['predicted_class']}, gen={result['generator']}")
+print("\n--- Testing Real Images (should be class=real, low AI confidence) ---")
+real_dir = "dataset/val/real"
+real_files = sorted(os.listdir(real_dir))[:5]
+for fname in real_files:
+    result = predict_image(os.path.join(real_dir, fname))
+    status = "OK" if not result["is_ai_generated"] else "WRONG"
+    print(f"  {fname}: {status} — conf={result['confidence']:.2f}, pred={result['predicted_class']}")
+
+ai_classes = [c for c in class_map["classes"] if c != "real"]
+for ai_class in ai_classes:
+    print(f"\n--- Testing {ai_class} Images (should be class={ai_class}, high AI confidence) ---")
+    ai_dir = f"dataset/val/{ai_class}"
+    if not os.path.isdir(ai_dir):
+        print(f"  SKIPPED: {ai_dir} not found")
+        continue
+    ai_files = sorted(os.listdir(ai_dir))[:5]
+    for fname in ai_files:
+        result = predict_image(os.path.join(ai_dir, fname))
+        status = "OK" if result["is_ai_generated"] else "WRONG"
+        print(f"  {fname}: {status} — conf={result['confidence']:.2f}, pred={result['predicted_class']}, gen={result['generator']}")
 
 # Test video pipeline
 print("\n--- Video Pipeline ---")
-try:
-    import cv2
+if importlib.util.find_spec("cv2") is not None:
     print("cv2 available — video pipeline ready")
-except ImportError:
+else:
     print("cv2 NOT available")
 
 # Test audio pipeline
 print("\n--- Audio Pipeline ---")
-try:
-    import torchaudio
+if importlib.util.find_spec("torchaudio") is not None:
     print("torchaudio available — audio pipeline ready")
-except ImportError:
+else:
     print("torchaudio NOT available")
 
-print("\n" + "="*60)
+print("\n" + "=" * 60)
 print("ALL TESTS COMPLETE")
-print("="*60)
+print("=" * 60)
