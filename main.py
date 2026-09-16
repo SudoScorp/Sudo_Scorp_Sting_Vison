@@ -68,7 +68,7 @@ def load_model():
         CLASS_MAP = {
             "classes": ["real", "ai_image", "ai_audio"],
             "class_to_idx": {"real": 0, "ai_image": 1, "ai_audio": 2},
-            "idx_to_class": {0: "real", 1: "ai_image", 2: "ai_audio"},
+            "idx_to_class": {"0": "real", "1": "ai_image", "2": "ai_audio"},
             "num_classes": 3,
         }
 
@@ -123,7 +123,7 @@ def detect_image(file_bytes: bytes) -> dict:
         output = MODEL(tensor)
         probabilities = F.softmax(output, dim=1)[0]
         confidence, predicted_idx = torch.max(probabilities, 0)
-        predicted_class = CLASS_MAP["idx_to_class"][predicted_idx.item()]
+        predicted_class = CLASS_MAP["idx_to_class"][str(predicted_idx.item())]
 
     # Build result
     idx_to_class = CLASS_MAP["idx_to_class"]
@@ -213,7 +213,7 @@ def detect_video(file_bytes: bytes) -> dict:
         # Aggregate predictions across frames
         avg_probs = torch.stack(frame_predictions).mean(dim=0)
         confidence, predicted_idx = torch.max(avg_probs, 0)
-        predicted_class = CLASS_MAP["idx_to_class"][predicted_idx.item()]
+        predicted_class = CLASS_MAP["idx_to_class"][str(predicted_idx.item())]
 
         class_names = CLASS_MAP["classes"]
         probs_dict = {cls: float(avg_probs[i]) for i, cls in enumerate(class_names)}
@@ -295,7 +295,7 @@ def detect_audio(file_bytes: bytes) -> dict:
             output = MODEL(tensor)
             probabilities = F.softmax(output, dim=1)[0]
             confidence, predicted_idx = torch.max(probabilities, 0)
-            predicted_class = CLASS_MAP["idx_to_class"][predicted_idx.item()]
+            predicted_class = CLASS_MAP["idx_to_class"][str(predicted_idx.item())]
 
         class_names = CLASS_MAP["classes"]
         probs_dict = {cls: float(probabilities[i]) for i, cls in enumerate(class_names)}
@@ -437,7 +437,7 @@ def scan_watermarks(file_bytes: bytes, file_type: str) -> dict:
             periphery[h//4:3*h//4, w//4:3*w//4] = 0
             ratio = np.mean(center) / (np.mean(periphery) + 1e-8)
             results["frequency_ratio"] = float(ratio)
-            results["periodic_pattern_detected"] = ratio > 3.0
+            results["periodic_pattern_detected"] = bool(ratio > 3.0)
 
             # Color channel correlation
             r, g, b = arr[:,:,0], arr[:,:,1], arr[:,:,2]

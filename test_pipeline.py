@@ -1,22 +1,9 @@
 """Test all detection pipelines directly without HTTP server."""
 import sys, os, json
-tmpdir = os.path.join(os.environ.get('LOCALAPPDATA', 'C:/Users/sudos/AppData/Local'), 'Temp', 'Sudo_Scorp_Sting_Vison')
-if os.path.isdir(tmpdir):
-    os.chdir(tmpdir)
-    sys.path.insert(0, tmpdir)
-    print(f"Working dir: {os.getcwd()}")
-else:
-    # Try alternative locations
-    for p in [r'C:\Users\sudos\AppData\Local\Temp\Sudo_Scorp_Sting_Vison',
-              r'C:\Users\sudos\odysseus\Sudo_Scorp_Sting_Vison']:
-        if os.path.isdir(p):
-            os.chdir(p)
-            sys.path.insert(0, p)
-            print(f"Working dir: {os.getcwd()}")
-            break
-    else:
-        print("ERROR: Cannot find working directory")
-        sys.exit(1)
+repo_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(repo_dir)
+sys.path.insert(0, repo_dir)
+print(f"Working dir: {os.getcwd()}")
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -89,13 +76,18 @@ for f in real_files:
     status = "OK" if not result['is_ai_generated'] else "WRONG"
     print(f"  {f}: {status} — conf={result['confidence']:.2f}, pred={result['predicted_class']}")
 
-print("\n--- Testing AI Images (should be class=ai, high AI confidence) ---")
-ai_dir = 'dataset/val/ai'
-ai_files = sorted(os.listdir(ai_dir))[:5]
-for f in ai_files:
-    result = predict_image(os.path.join(ai_dir, f))
-    status = "OK" if result['is_ai_generated'] else "WRONG"
-    print(f"  {f}: {status} — conf={result['confidence']:.2f}, pred={result['predicted_class']}, gen={result['generator']}")
+ai_classes = [c for c in class_map['classes'] if c != 'real']
+for ai_class in ai_classes:
+    print(f"\n--- Testing {ai_class} Images (should be class={ai_class}, high AI confidence) ---")
+    ai_dir = f'dataset/val/{ai_class}'
+    if not os.path.isdir(ai_dir):
+        print(f"  SKIPPED: {ai_dir} not found")
+        continue
+    ai_files = sorted(os.listdir(ai_dir))[:5]
+    for f in ai_files:
+        result = predict_image(os.path.join(ai_dir, f))
+        status = "OK" if result['is_ai_generated'] else "WRONG"
+        print(f"  {f}: {status} — conf={result['confidence']:.2f}, pred={result['predicted_class']}, gen={result['generator']}")
 
 # Test video pipeline
 print("\n--- Video Pipeline ---")
