@@ -29,6 +29,41 @@ const mediaTypeFor = (file) => {
   return EXTENSION_TO_TYPE[ext] || null
 }
 
+const buildReportText = (entries) => {
+  const lines = [
+    'SudoScorpStingVision — Detection Report',
+    `Generated: ${new Date().toISOString()}`,
+    `Files analyzed: ${entries.length}`,
+    ''
+  ]
+
+  entries.forEach((entry, index) => {
+    const r = entry.results
+    const probLines = Object.entries(r.probabilities || {}).map(
+      ([cls, prob]) => `    - ${cls}: ${(prob * 100).toFixed(2)}%`
+    )
+    lines.push('='.repeat(64))
+    lines.push(`${index + 1}. ${entry.fileName} (${entry.mediaType})`)
+    lines.push(`   Analyzed: ${entry.timestamp}`)
+    lines.push(
+      `   Verdict: ${r.is_ai_generated ? 'AI-Generated' : 'Likely Real'}`
+    )
+    lines.push(`   Confidence: ${(r.confidence * 100).toFixed(2)}%`)
+    lines.push(`   Predicted class: ${r.predicted_class}`)
+    lines.push(`   Source attribution: ${r.source_attribution}`)
+    lines.push('   Probabilities:', ...probLines)
+    lines.push(
+      `   Policy check: ${r.policy_check?.reason} ` +
+        `(passed: ${r.policy_check?.policy_passed}, ` +
+        `flagged: ${r.policy_check?.flagged_for_review})`
+    )
+    lines.push(`   Watermark scan checksum: ${r.watermark_scan?.checksum}`)
+    lines.push('')
+  })
+
+  return lines.join('\n')
+}
+
 const Section = ({ title, children }) => {
   return (
     <div style={{ marginTop: '16px' }}>
@@ -49,6 +84,7 @@ const App = () => {
   const [results, setResults] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [history, setHistory] = useState([])
 
   const handleFileChange = (event) => {
     const selected = event.target.files[0]
@@ -78,6 +114,16 @@ const App = () => {
         }
       )
       setResults(response.data)
+      setHistory((prev) => [
+        {
+          id: `${Date.now()}-${file.name}`,
+          fileName: file.name,
+          mediaType,
+          timestamp: new Date().toISOString(),
+          results: response.data
+        },
+        ...prev
+      ])
     } catch (err) {
       const detail = err.response?.data?.detail
       setError(
@@ -86,6 +132,18 @@ const App = () => {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleDownloadReport = () => {
+    const blob = new Blob([buildReportText(history)], {
+      type: 'text/plain'
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `sudoscorpstingvision-report-${Date.now()}.txt`
+    link.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -205,6 +263,70 @@ const App = () => {
               {JSON.stringify(results.metadata, null, 2)}
             </pre>
           </Section>
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <div style={{ marginTop: '30px' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}
+          >
+            <h2 style={{ margin: 0 }}>Test Results ({history.length})</h2>
+            <div>
+              <button type='button' onClick={handleDownloadReport}>
+                Download Report
+              </button>{' '}
+              <button type='button' onClick={() => setHistory([])}>
+                Clear
+              </button>
+            </div>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th
+                  style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}
+                >
+                  File
+                </th>
+                <th
+                  style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}
+                >
+                  Verdict
+                </th>
+                <th
+                  style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}
+                >
+                  Confidence
+                </th>
+                <th
+                  style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}
+                >
+                  Analyzed
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((entry) => (
+                <tr key={entry.id}>
+                  <td>
+                    {entry.fileName} ({entry.mediaType})
+                  </td>
+                  <td>
+                    {entry.results.is_ai_generated
+                      ? 'AI-Generated'
+                      : 'Likely Real'}
+                  </td>
+                  <td>{(entry.results.confidence * 100).toFixed(2)}%</td>
+                  <td>{new Date(entry.timestamp).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
