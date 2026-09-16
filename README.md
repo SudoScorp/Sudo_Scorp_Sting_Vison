@@ -42,13 +42,13 @@ The server starts at `http://0.0.0.0:8000`
 
 ### API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Server and model health check |
-| `/api/image` | POST | Upload image for AI detection |
-| `/api/video` | POST | Upload video for AI detection |
-| `/api/audio` | POST | Upload audio for AI detection |
-| `/attribution` | GET | Model attribution info |
+| Endpoint       | Method | Description                   |
+| -------------- | ------ | ----------------------------- |
+| `/health`      | GET    | Server and model health check |
+| `/api/image`   | POST   | Upload image for AI detection |
+| `/api/video`   | POST   | Upload video for AI detection |
+| `/api/audio`   | POST   | Upload audio for AI detection |
+| `/attribution` | GET    | Model attribution info        |
 
 ### Example API Usage
 
@@ -142,7 +142,7 @@ The detection model uses a fine-tuned **ResNet18** backbone:
 
 ## Dataset
 
-The dataset is generated with `generate_dataset.py` (not checked into git —
+The dataset is generated with `generate_dataset.py` (not checked into Git —
 run the command below before training). It creates three classes:
 
 - **real** (200 train + 50 val by default): natural noise patterns, organic textures, blended color blobs
@@ -153,7 +153,7 @@ Counts are configurable via `--train`, `--val`, `--output`, and `--seed`.
 
 ### Dataset Structure
 
-```
+```text
 dataset/
   train/
     real/         # 200 images
@@ -205,6 +205,7 @@ The platform includes real artifact detection (not just stubs):
 - **Frequency Ratio**: Center vs periphery FFT energy ratio
 
 Each detection includes:
+
 - `type`: Category of finding
 - `detail`: Human-readable description
 - `severity`: 0-1 score indicating confidence of the finding
@@ -212,10 +213,12 @@ Each detection includes:
 ## Policy Check
 
 The mock policy check combines:
+
 - Model AI confidence (70% weight)
 - Maximum watermark artifact severity (30% weight)
 
 Results:
+
 - **Score > 0.90**: Flagged for manual review
 - **Score > 0.70**: Review recommended
 - **Score ≤ 0.70**: Passes community standards
@@ -235,7 +238,7 @@ Results:
 
 ## File Structure
 
-```
+```text
 SudoScorpStingVision/
 ├── main.py                    # FastAPI server
 ├── model.py                   # Model definition (ResNet18)
@@ -279,6 +282,7 @@ docker run -p 8000:8000 sudo-scorp-sting-vision
 ### Production
 
 For production deployment:
+
 1. Use a production ASGI server (gunicorn with uvicorn workers)
 2. Enable HTTPS
 3. Set up proper CORS policies
@@ -292,6 +296,7 @@ MIT License - see LICENSE file for details.
 ## Credits
 
 Built with:
+
 - PyTorch / TorchVision / TorchAudio
 - FastAPI / Uvicorn
 - React / Axios

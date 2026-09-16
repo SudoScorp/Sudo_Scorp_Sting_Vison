@@ -12,7 +12,6 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
-from PIL import Image
 import numpy as np
 
 from model import DeepfakeDetectorCNN as DeepfakeDetector

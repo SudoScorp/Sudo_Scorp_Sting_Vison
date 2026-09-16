@@ -11,16 +11,16 @@ import os
 import io
 import json
 import tempfile
-import shutil
-from pathlib import Path
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
 
+from typing import Any, Optional
+
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
 import numpy as np
@@ -45,8 +45,8 @@ app.add_middleware(
 )
 
 # ---- Global State ----
-MODEL = None
-CLASS_MAP = None
+MODEL: Optional[nn.Module] = None
+CLASS_MAP: Optional[dict[str, Any]] = None
 MODEL_LOADED = False
 MODEL_PATH = "model_weights.pth"
 CLASS_MAP_PATH = "class_map.json"
@@ -114,6 +114,7 @@ def detect_image(file_bytes: bytes) -> dict:
     Detect whether an image is AI-generated.
     Returns confidence scores and attribution info.
     """
+    assert MODEL is not None and CLASS_MAP is not None, "Model not loaded. Call load_model() first."
     transform = get_transform()
 
     img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
@@ -126,7 +127,6 @@ def detect_image(file_bytes: bytes) -> dict:
         predicted_class = CLASS_MAP["idx_to_class"][str(predicted_idx.item())]
 
     # Build result
-    idx_to_class = CLASS_MAP["idx_to_class"]
     class_names = CLASS_MAP["classes"]
     probs_dict = {cls: float(probabilities[i]) for i, cls in enumerate(class_names)}
 
@@ -169,6 +169,7 @@ def detect_video(file_bytes: bytes) -> dict:
     Analyze video for AI-generated content.
     Samples frames and aggregates predictions.
     """
+    assert MODEL is not None and CLASS_MAP is not None, "Model not loaded. Call load_model() first."
     transform = get_transform()
     frame_predictions = []
     total_frames = 0
@@ -255,6 +256,7 @@ def detect_audio(file_bytes: bytes) -> dict:
     Analyze audio for AI-generated content.
     Uses mel spectrogram converted to image-like input for the CNN.
     """
+    assert MODEL is not None and CLASS_MAP is not None, "Model not loaded. Call load_model() first."
     import torchaudio
     import torchaudio.transforms as AT
 
@@ -342,7 +344,7 @@ def detect_audio(file_bytes: bytes) -> dict:
 # ---- Metadata Extraction ----
 def extract_metadata(file_bytes: bytes, file_type: str) -> dict:
     """Extract technical metadata from uploaded file."""
-    metadata = {"file_size_bytes": len(file_bytes)}
+    metadata: dict[str, Any] = {"file_size_bytes": len(file_bytes)}
 
     try:
         if file_type == "image":
@@ -406,7 +408,7 @@ def scan_watermarks(file_bytes: bytes, file_type: str) -> dict:
     Scan for invisible watermarks and AI generator artifacts.
     Currently detects basic statistical anomalies.
     """
-    results = {
+    results: dict[str, Any] = {
         "watermarks_found": [],
         "checksum": None,
         "compression_artifacts": None,
@@ -474,7 +476,7 @@ def scan_watermarks(file_bytes: bytes, file_type: str) -> dict:
 # ---- Policy Check ----
 def mock_external_policy_check(is_ai: bool, confidence: float, file_type: str) -> dict:
     """Mock external community standards / policy check."""
-    result = {
+    result: dict[str, Any] = {
         "policy_passed": not is_ai or confidence < 0.95,
         "ai_confidence": confidence,
         "flagged_for_review": is_ai and confidence > 0.7,
@@ -490,7 +492,7 @@ def mock_external_policy_check(is_ai: bool, confidence: float, file_type: str) -
     elif is_ai:
         result["reason"] = f"Low confidence ({confidence:.1%}) AI-generated {file_type} — passed"
     else:
-        result["reason"] = f"Content appears to be human-generated"
+        result["reason"] = "Content appears to be human-generated"
 
     return result
 
