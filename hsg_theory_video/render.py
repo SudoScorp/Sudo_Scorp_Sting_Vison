@@ -240,6 +240,139 @@ def slide_diagram_force(ax, s):
             ha="center", va="center", linespacing=1.3)
 
 
+def slide_fabric_well(ax, s):
+    add_title(ax, s["title"])
+    add_plain_callout(ax, s.get("plain"), y=9.05)
+
+    ax3d = plt.gcf().add_axes([0.16, 0.08, 0.68, 0.66], projection="3d")
+    ax3d.computed_zorder = False  # mplot3d's automatic depth-sort picks the wrong
+                                   # order for overlapping surfaces; draw in the
+                                   # explicit order below instead (sheet, then planet,
+                                   # then marble on top)
+    n = 80
+    x = np.linspace(-3, 3, n)
+    y_ = np.linspace(-3, 3, n)
+    X, Y = np.meshgrid(x, y_)
+    R = np.sqrt(X ** 2 + Y ** 2) + 0.4
+    Z = -2.0 / R
+    ls = LightSource(azdeg=310, altdeg=55)
+    cmap = LinearSegmentedColormap.from_list(
+        "sheet", [[0.05, 0.06, 0.10], [0.25, 0.35, 0.55], [0.85, 0.9, 0.98]])
+    znorm = (Z - Z.min()) / (Z.max() - Z.min() + 1e-9)
+    rgb = ls.shade(znorm, cmap=cmap, vert_exag=0.25, blend_mode="soft")
+    ax3d.plot_surface(X, Y, Z, facecolors=rgb, rstride=2, cstride=2, linewidth=0.15,
+                       edgecolor=(1, 1, 1, 0.12), antialiased=True, shade=False, zorder=1)
+
+    # a "planet" sphere resting at the bottom of the dip
+    u = np.linspace(0, 2 * np.pi, 40)
+    v = np.linspace(0, np.pi, 40)
+    r_p = 0.6
+    zc = -2.0 / 0.4 + r_p * 0.55
+    xs = r_p * np.outer(np.cos(u), np.sin(v))
+    ys = r_p * np.outer(np.sin(u), np.sin(v))
+    zs = r_p * np.outer(np.ones_like(u), np.cos(v)) + zc
+    ls2 = LightSource(azdeg=300, altdeg=50)
+    base = np.array([0.36, 0.42, 0.55])
+    rgb2 = ls2.shade(zs, cmap=LinearSegmentedColormap.from_list(
+        "planet", [[0.03, 0.04, 0.07], base, [0.9, 0.92, 0.97]]), blend_mode="soft")
+    ax3d.plot_surface(xs, ys, zs, facecolors=rgb2, rstride=1, cstride=1, linewidth=0,
+                       shade=False, antialiased=True, zorder=2)
+
+    # a marble rolling toward the dip, drawn as a small shaded sphere and forced
+    # to draw last (see computed_zorder=False above) so it never gets buried
+    bx, by = 2.1, 0.5
+    bz = -2.0 / (np.sqrt(bx ** 2 + by ** 2) + 0.4)
+    r_m = 0.26
+    gold_lt_rgb = tuple(int(GOLD_LT.lstrip("#")[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    xm = bx + r_m * np.outer(np.cos(u), np.sin(v))
+    ym = by + r_m * np.outer(np.sin(u), np.sin(v))
+    zm = bz + r_m + r_m * np.outer(np.ones_like(u), np.cos(v))
+    ls3 = LightSource(azdeg=300, altdeg=55)
+    gold_rgb = ls3.shade(zm, cmap=LinearSegmentedColormap.from_list(
+        "marble", [[0.25, 0.16, 0.02], gold_lt_rgb, [1, 0.97, 0.85]]), blend_mode="soft")
+    ax3d.plot_surface(xm, ym, zm, facecolors=gold_rgb, rstride=1, cstride=1,
+                       linewidth=0, shade=False, antialiased=True, zorder=20)
+
+    ax3d.set_box_aspect((1, 1, 0.55))
+    ax3d.set_zlim(Z.min() * 1.1, max(zc + r_p * 1.3, 0.3))
+    ax3d.set_axis_off()
+    ax3d.set_facecolor("none")
+    ax3d.patch.set_alpha(0)
+    ax3d.view_init(elev=24, azim=-50)
+
+    ax.text(W / 2, 0.85, wrap(s["caption"], 92), fontsize=16.5, color=MUTED,
+            ha="center", va="center", linespacing=1.3)
+
+
+def slide_balloon_expansion(ax, s):
+    import math
+    add_title(ax, s["title"])
+    add_plain_callout(ax, s.get("plain"), y=9.05)
+
+    cx1, cy1, r1 = 5.6, 5.0, 1.7
+    cx2, cy2, r2 = 13.8, 5.0, 2.6
+    for cx, cy, r, label in [(cx1, cy1, r1, "BEFORE"), (cx2, cy2, r2, "AFTER")]:
+        ax.add_patch(plt.Circle((cx, cy), r, color=GOLD, alpha=0.06, zorder=1))
+        ax.add_patch(plt.Circle((cx, cy), r, fill=False, edgecolor=GOLD, lw=2.5,
+                                 alpha=0.85, zorder=2))
+        ax.text(cx, cy - r - 0.6, label, fontsize=18, color=MUTED, ha="center",
+                va="center", weight="bold")
+
+    n_dots = 8
+    angle_offset = math.pi / n_dots  # keep dots off the top/bottom so labels stay clear
+    for i in range(n_dots):
+        ang = 2 * math.pi * i / n_dots + angle_offset
+        x1, y1 = cx1 + r1 * math.cos(ang), cy1 + r1 * math.sin(ang)
+        x2, y2 = cx2 + r2 * math.cos(ang), cy2 + r2 * math.sin(ang)
+        ax.add_patch(plt.Circle((x1, y1), 0.1, color=TEAL, zorder=5))
+        ax.add_patch(plt.Circle((x2, y2), 0.1, color=TEAL, zorder=5))
+        ax.annotate("", xy=(x2 + 0.4 * math.cos(ang), y2 + 0.4 * math.sin(ang)),
+                     xytext=(x2, y2),
+                     arrowprops=dict(arrowstyle="-|>", color=RED, lw=1.6), zorder=4)
+
+    ax.annotate("", xy=(cx2 - r2 - 0.3, cy2), xytext=(cx1 + r1 + 0.3, cy1),
+                 arrowprops=dict(arrowstyle="-|>", color=FG, lw=2.5))
+    ax.text((cx1 + r1 + cx2 - r2) / 2, cy1 + 0.55, "space itself stretches",
+            fontsize=15, color=FG, ha="center", va="center", style="italic")
+
+    ax.text(W / 2, 0.85, wrap(s["caption"], 92), fontsize=16.5, color=MUTED,
+            ha="center", va="center", linespacing=1.3)
+
+
+def slide_donut(ax, s):
+    import math
+    add_title(ax, s["title"])
+    add_plain_callout(ax, s.get("plain"), y=9.05)
+
+    cx, cy, r = 6.6, 4.6, 2.6
+    total = sum(sl["value"] for sl in s["slices"])
+    start = 90.0
+    for sl in s["slices"]:
+        theta = 360.0 * sl["value"] / total
+        wedge = mpatches.Wedge((cx, cy), r, start - theta, start,
+                                facecolor=sl["color"], edgecolor=BG, linewidth=3)
+        ax.add_patch(wedge)
+        mid_ang = math.radians(start - theta / 2)
+        lx, ly = cx + r * 0.72 * math.cos(mid_ang), cy + r * 0.72 * math.sin(mid_ang)
+        ax.text(lx, ly, f"{sl['value']}%", fontsize=20, color=BG, ha="center",
+                va="center", weight="bold")
+        start -= theta
+    ax.add_patch(plt.Circle((cx, cy), r * 0.52, color=BG2, zorder=6))
+    if s.get("center_label"):
+        ax.text(cx, cy, s["center_label"], fontsize=16, color=FG, ha="center",
+                va="center", linespacing=1.3, weight="bold", zorder=7)
+
+    ly0 = 6.3
+    for i, sl in enumerate(s["slices"]):
+        yy = ly0 - i * 0.85
+        ax.add_patch(mpatches.Rectangle((11.6, yy), 0.4, 0.35, color=sl["color"]))
+        ax.text(12.15, yy + 0.17, wrap(sl["label"], 26), fontsize=16, color=FG,
+                va="center", linespacing=1.2)
+
+    ax.text(W / 2, 0.85, wrap(s["caption"], 92), fontsize=16.5, color=MUTED,
+            ha="center", va="center", linespacing=1.3)
+
+
 def slide_table(ax, s):
     add_title(ax, s["title"])
     y0 = add_plain_callout(ax, s.get("plain"), y=9.05)
@@ -355,6 +488,9 @@ RENDERERS = {
     "bullets": slide_bullets,
     "equation_block": slide_equation_block,
     "diagram_force": slide_diagram_force,
+    "fabric_well": slide_fabric_well,
+    "balloon_expansion": slide_balloon_expansion,
+    "donut": slide_donut,
     "table": slide_table,
     "bar_compare": slide_bar_compare,
     "grouped_bar": slide_grouped_bar,

@@ -1,6 +1,13 @@
-"""Generate narration WAVs per slide with espeak-ng and report durations."""
+"""Generate narration WAVs per slide with SVOX Pico TTS and report durations.
+
+Pico (pico2wave) is a corpus-based offline voice, noticeably warmer and more
+natural than espeak/Mbrola formant/diphone synthesis. It's synthesized
+sentence-by-sentence (its internal buffer truncates very long strings) and
+then lightly slowed + pitched down with rubberband for a calmer, warmer read.
+"""
 import json
 import os
+import re
 import subprocess
 
 from content import SLIDES
@@ -8,27 +15,56 @@ from content import SLIDES
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), "audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
-VOICE = "mb-us1"  # American English female (Mbrola), calmer/smoother than default espeak formant voice
-SPEED = 142       # words per minute -- slightly slower, calmer pace
-PITCH = 38        # slightly lower pitch reads as calmer/more measured
-AMP = 190
-GAP = 8           # extra pause between words (centiseconds), measured delivery
-SR = 22050        # standardized output rate -- mbrola voices render natively at 16kHz,
-                   # so every file is resampled to this to match the silence clips in build.py
+LANG = "en-US"
+SR = 22050        # standardized output rate
+TEMPO = 0.93       # slight slow-down, calmer pace
+PITCH = 0.97       # slight pitch drop, warmer tone
+
+
+def split_sentences(text):
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [p for p in parts if p]
+
+
+def synth_sentence(text, out_path):
+    subprocess.run(
+        ["pico2wave", "-l", LANG, "-w", out_path, text],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
 
 
 def synth(text, out_path):
-    raw_path = out_path + ".raw.wav"
+    sentences = split_sentences(text)
+    tmp_dir = out_path + ".parts"
+    os.makedirs(tmp_dir, exist_ok=True)
+    parts = []
+    for i, sent in enumerate(sentences):
+        p = os.path.join(tmp_dir, f"{i:03d}.wav")
+        synth_sentence(sent, p)
+        parts.append(p)
+
+    concat_list = os.path.join(tmp_dir, "list.txt")
+    with open(concat_list, "w") as f:
+        for p in parts:
+            f.write(f"file '{os.path.abspath(p)}'\n")
+    raw_concat = out_path + ".rawconcat.wav"
     subprocess.run(
-        ["espeak-ng", "-v", VOICE, "-s", str(SPEED), "-p", str(PITCH),
-         "-a", str(AMP), "-g", str(GAP), text, "-w", raw_path],
-        check=True,
-    )
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", raw_path, "-ar", str(SR), "-ac", "1", out_path],
+        ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list,
+         "-c:a", "pcm_s16le", raw_concat],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
-    os.remove(raw_path)
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", raw_concat,
+         "-af", f"rubberband=tempo={TEMPO}:pitch={PITCH}",
+         "-ar", str(SR), "-ac", "1", out_path],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+    for p in parts:
+        os.remove(p)
+    os.remove(concat_list)
+    os.remove(raw_concat)
+    os.rmdir(tmp_dir)
 
 
 def duration(path):
