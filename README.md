@@ -72,13 +72,14 @@ curl -X POST -F "file=@audio.wav" http://localhost:8000/api/audio
 {
   "is_ai_generated": true,
   "confidence": 0.95,
-  "predicted_class": "ai",
+  "predicted_class": "ai_image",
   "probabilities": {
-    "real": 0.05,
-    "ai": 0.95
+    "real": 0.03,
+    "ai_image": 0.95,
+    "ai_audio": 0.02
   },
-  "source_attribution": "ai",
-  "generator": "AI-Generated",
+  "source_attribution": "ai_image",
+  "generator": "ai_image",
   "metadata": {
     "file_size_bytes": 123456,
     "format": "JPEG",
@@ -88,10 +89,17 @@ curl -X POST -F "file=@audio.wav" http://localhost:8000/api/audio
   "watermark_scan": {
     "watermarks_found": [],
     "checksum": "a1b2c3d4e5f6",
-    "compression_artifacts": null
+    "compression_artifacts": null,
+    "high_frequency_energy": 42.1,
+    "frequency_ratio": 1.8,
+    "periodic_pattern_detected": false,
+    "channel_correlations": {
+      "red_green": 0.01,
+      "green_blue": 0.02
+    }
   },
   "policy_check": {
-    "policy_passed": true,
+    "policy_passed": false,
     "ai_confidence": 0.95,
     "flagged_for_review": true,
     "reason": "High confidence (95.0%) AI-generated image detected"
@@ -130,38 +138,31 @@ The detection model uses a fine-tuned **ResNet18** backbone:
 - **Frozen layers**: Early layers frozen for feature extraction
 - **Fine-tuned layers**: Layer4 + classifier head trained on deepfake dataset
 - **Input size**: 224x224 RGB images
-- **Classes**: 2 (real, AI-generated)
+- **Classes**: determined by the dataset at training time (the bundled generator produces 3: `real`, `ai_image`, `ai_audio`); the class count and mapping are saved to `class_map.json` and read by the server at inference time
 
 ## Dataset
 
-The included dataset was generated using `generate_dataset.py`:
+The dataset is generated with `generate_dataset.py` (not checked into git —
+run the command below before training). It creates three classes:
 
-- **Real images** (400 train + 100 val): Natural noise patterns, organic textures, 1/f frequency distribution
-- **AI images** (400 train + 100 val): GAN fingerprints (periodic artifacts, checkerboard patterns), diffusion artifacts (over-smooth with added noise), hybrid artifacts
+- **real** (200 train + 50 val by default): natural noise patterns, organic textures, blended color blobs
+- **ai_image** (200 train + 50 val by default): checkerboard upsampling artifacts plus high-frequency noise, mimicking GAN/diffusion image generators
+- **ai_audio** (200 train + 50 val by default): synthetic spectrogram-style patterns, mimicking AI voice/audio generators (e.g. ElevenLabs-style output)
+
+Counts are configurable via `--train`, `--val`, `--output`, and `--seed`.
 
 ### Dataset Structure
 
 ```
 dataset/
-  original/     # Real-looking images
-    real_00000.png
-    real_00001.png
-    ...
-  deepfake/     # AI-generated-looking images
-    ai_00000.png
-    ai_00001.png
-    ...
-```
-
-For training, the dataset is split into train/val:
-```
-dataset/
   train/
-    real/       # 400 real images
-    ai/         # 400 AI images
+    real/         # 200 images
+    ai_image/     # 200 images
+    ai_audio/     # 200 images
   val/
-    real/       # 100 real images
-    ai/         # 100 AI images
+    real/         # 50 images
+    ai_image/     # 50 images
+    ai_audio/     # 50 images
 ```
 
 ## Detection Pipeline
@@ -241,19 +242,29 @@ SudoScorpStingVision/
 ├── train.py                   # Training pipeline
 ├── generate_dataset.py        # Synthetic dataset generator
 ├── requirements.txt           # Python dependencies
+├── Dockerfile                 # Backend container image
+├── LICENSE                    # MIT License
 ├── README.md                  # This file
-├── App.js                     # React frontend
-├── best_model.pth             # Trained model weights
-├── model_weights.pth          # Copy of model weights (for inference)
+├── frontend/                  # React frontend
+│   ├── package.json
+│   ├── public/
+│   │   └── index.html
+│   └── src/
+│       ├── index.js
+│       └── App.js
+├── best_model.pth             # Trained model weights (generated, gitignored)
+├── model_weights.pth          # Copy of model weights for inference (generated, gitignored)
 ├── class_map.json            # Class mapping and metadata
 ├── training_history.json     # Training metrics
-└── dataset/                   # Training dataset
+└── dataset/                   # Training dataset (generated, gitignored)
     ├── train/
     │   ├── real/
-    │   └── ai/
+    │   ├── ai_image/
+    │   └── ai_audio/
     └── val/
         ├── real/
-        └── ai/
+        ├── ai_image/
+        └── ai_audio/
 ```
 
 ## Deployment

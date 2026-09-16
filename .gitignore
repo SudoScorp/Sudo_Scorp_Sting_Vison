@@ -17,3 +17,7 @@ test_data/
 venv/
 env/
 .DS_Store
+
+# Block frontend build output and dependencies
+frontend/node_modules/
+frontend/build/
