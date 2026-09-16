@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
+import PropTypes from 'prop-types'
 import axios from 'axios'
 
 const API_BASE_URL =
@@ -35,6 +36,11 @@ const Section = ({ title, children }) => {
       {children}
     </div>
   )
+}
+
+Section.propTypes = {
+  title: PropTypes.string.isRequired,
+  children: PropTypes.node.isRequired
 }
 
 const App = () => {
@@ -93,7 +99,7 @@ const App = () => {
     >
       <h1>SudoScorpStingVision</h1>
       <p>
-        Upload an image, video, or audio file to check whether it's
+        Upload an image, video, or audio file to check whether it is
         AI-generated.
       </p>
 
